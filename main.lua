@@ -43,6 +43,8 @@ local state = {
 	movementEnabled = false,
 	walkSpeed = 16,
 	jumpPower = 50,
+	infiniteJumpEnabled = false,
+	noclipEnabled = false,
 	-- Visuals settings
 	fov = 70,
 	espEnabled = false,
@@ -187,6 +189,8 @@ local panelTransparencyInput
 local movementToggle
 local walkSpeedInput
 local jumpPowerInput
+local infiniteJumpToggle
+local noclipToggle
 local fovInput
 local espToggle
 local espColorPreview
@@ -202,6 +206,9 @@ local hitboxTeamCheckToggle
 local hitboxUpdateConnection
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
+
+local noclipConnection
+local infiniteJumpConnection
 
 local function create(className, props, children)
 	local item = Instance.new(className)
@@ -407,13 +414,72 @@ local function applyAccent()
 	drawCrosshair()
 end
 
+local function updateNoclip()
+	if noclipConnection then noclipConnection:Disconnect(); noclipConnection = nil end
+	
+	if state.noclipEnabled then
+		noclipConnection = RunService.Stepped:Connect(function()
+			local character = player.Character
+			if character then
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = false
+					end
+				end
+			end
+		end)
+	else
+		local character = player.Character
+		if character then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = true
+				end
+			end
+		end
+	end
+	
+	if noclipToggle then
+		noclipToggle.Text = state.noclipEnabled and "NOCLIP: ENABLED" or "NOCLIP: DISABLED"
+		noclipToggle.BackgroundColor3 = state.noclipEnabled and state.accent or theme.card2
+		noclipToggle.TextColor3 = state.noclipEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end
+end
+
+local function updateInfiniteJump()
+	if infiniteJumpConnection then infiniteJumpConnection:Disconnect(); infiniteJumpConnection = nil end
+	
+	if state.infiniteJumpEnabled then
+		infiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
+			local character = player.Character
+			if character then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if humanoid then
+					humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+				end
+			end
+		end)
+	end
+	
+	if infiniteJumpToggle then
+		infiniteJumpToggle.Text = state.infiniteJumpEnabled and "INF JUMP: ENABLED" or "INF JUMP: DISABLED"
+		infiniteJumpToggle.BackgroundColor3 = state.infiniteJumpEnabled and state.accent or theme.card2
+		infiniteJumpToggle.TextColor3 = state.infiniteJumpEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end
+end
+
 local function applyMovement()
 	local character = player.Character
 	if character then
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
-			if state.movementEnabled then humanoid.WalkSpeed = state.walkSpeed; humanoid.JumpPower = state.jumpPower
-			else humanoid.WalkSpeed = 16; humanoid.JumpPower = 50 end
+			if state.movementEnabled then 
+				humanoid.WalkSpeed = state.walkSpeed
+				humanoid.JumpPower = state.jumpPower
+			else 
+				humanoid.WalkSpeed = 16
+				humanoid.JumpPower = 50
+			end
 		end
 	end
 	if movementToggle then
@@ -421,6 +487,8 @@ local function applyMovement()
 		movementToggle.BackgroundColor3 = state.movementEnabled and state.accent or theme.card2
 		movementToggle.TextColor3 = state.movementEnabled and Color3.fromRGB(8, 8, 11) or theme.text
 	end
+	updateNoclip()
+	updateInfiniteJump()
 end
 
 local function applyFOV()
@@ -446,7 +514,6 @@ local function updateHitboxes()
 		for _, target in ipairs(Players:GetPlayers()) do
 			if target == player then continue end
 			if state.hitboxTeamCheck and target.Team == player.Team then
-				-- Clean up if team check blocks them
 				if state.hitboxParts[target.UserId] then
 					for _, part in pairs(state.hitboxParts[target.UserId]) do
 						if part then part:Destroy() end
@@ -478,7 +545,6 @@ local function updateHitboxes()
 				continue
 			end
 			
-			-- Initialize or update hitbox parts for this player
 			if not state.hitboxParts[target.UserId] then
 				state.hitboxParts[target.UserId] = {}
 			end
@@ -500,7 +566,6 @@ local function updateHitboxes()
 						hitboxPart.Size = Vector3.new(state.hitboxSize, state.hitboxSize, state.hitboxSize)
 						hitboxPart.Parent = character
 						
-						-- Weld to the real part
 						local weld = Instance.new("WeldConstraint")
 						weld.Part0 = hitboxPart
 						weld.Part1 = realPart
@@ -508,7 +573,6 @@ local function updateHitboxes()
 						
 						state.hitboxParts[target.UserId][partName] = hitboxPart
 					else
-						-- Update size
 						hitboxPart.Size = Vector3.new(state.hitboxSize, state.hitboxSize, state.hitboxSize)
 					end
 				end
@@ -517,7 +581,6 @@ local function updateHitboxes()
 			state.hitboxPlayers[target.UserId] = target
 		end
 		
-		-- Clean up players who left
 		for userId, _ in pairs(state.hitboxParts) do
 			if not Players:GetPlayerByUserId(userId) then
 				for _, part in pairs(state.hitboxParts[userId]) do
@@ -894,6 +957,7 @@ local function renderMovement()
 	clearContent()
 	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
+	
 	sectionHeader("movement", "Enable custom movement speed and jump power for your character.", contentFrame)
 	movementToggle = settingsButton("MOVEMENT: DISABLED", contentFrame)
 	walkSpeedInput = labeledInput("walk speed", "Walk speed (16-200)", contentFrame)
@@ -901,7 +965,18 @@ local function renderMovement()
 	jumpPowerInput = labeledInput("jump power", "Jump power (50-500)", contentFrame)
 	jumpPowerInput.Text = tostring(state.jumpPower)
 	local saveMovement = settingsButton("APPLY MOVEMENT", contentFrame)
-	movementToggle.MouseButton1Click:Connect(function() state.movementEnabled = not state.movementEnabled; applyMovement() end)
+	
+	sectionHeader("infinite jump", "Jump infinitely in the air with no cooldown between jumps.", contentFrame)
+	infiniteJumpToggle = settingsButton("INF JUMP: DISABLED", contentFrame)
+	
+	sectionHeader("noclip", "Walk through walls and objects. Use with caution.", contentFrame)
+	noclipToggle = settingsButton("NOCLIP: DISABLED", contentFrame)
+	
+	movementToggle.MouseButton1Click:Connect(function() 
+		state.movementEnabled = not state.movementEnabled
+		applyMovement()
+	end)
+	
 	saveMovement.MouseButton1Click:Connect(function()
 		local speed = tonumber(walkSpeedInput.Text)
 		local jump = tonumber(jumpPowerInput.Text)
@@ -911,6 +986,17 @@ local function renderMovement()
 		jumpPowerInput.Text = tostring(state.jumpPower)
 		applyMovement()
 	end)
+	
+	infiniteJumpToggle.MouseButton1Click:Connect(function()
+		state.infiniteJumpEnabled = not state.infiniteJumpEnabled
+		updateInfiniteJump()
+	end)
+	
+	noclipToggle.MouseButton1Click:Connect(function()
+		state.noclipEnabled = not state.noclipEnabled
+		updateNoclip()
+	end)
+	
 	applyMovement()
 end
 
@@ -1376,46 +1462,47 @@ local function buildGui()
 	switchTab("Homepage")
 end
 
-local function statRow(label, value, order)
-	local row = create("Frame", {
-		Name = label:gsub("%s+", "") .. "Row",
-		Size = UDim2.new(1, -14, 0, 52),
-		BackgroundColor3 = theme.card,
-		BorderSizePixel = 0,
-		LayoutOrder = order,
-		Parent = contentFrame
-	})
-	corner(row, 12)
-	stroke(row, theme.stroke, 0.55)
-	create("TextLabel", {
-		Position = UDim2.fromOffset(14, 8),
-		Size = UDim2.new(1, -28, 0, 15),
-		BackgroundTransparency = 1,
-		Text = label,
-		TextColor3 = theme.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		Parent = row
-	})
-	create("TextLabel", {
-		Position = UDim2.fromOffset(14, 26),
-		Size = UDim2.new(1, -28, 0, 18),
-		BackgroundTransparency = 1,
-		Text = tostring(value),
-		TextColor3 = theme.text,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 14,
-		Parent = row
-	})
-end
-
 local function renderHomepage()
 	clearContent()
 	create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
+	
+	local function statRow(label, value, order)
+		local row = create("Frame", {
+			Name = label:gsub("%s+", "") .. "Row",
+			Size = UDim2.new(1, -14, 0, 52),
+			BackgroundColor3 = theme.card,
+			BorderSizePixel = 0,
+			LayoutOrder = order,
+			Parent = contentFrame
+		})
+		corner(row, 12)
+		stroke(row, theme.stroke, 0.55)
+		create("TextLabel", {
+			Position = UDim2.fromOffset(14, 8),
+			Size = UDim2.new(1, -28, 0, 15),
+			BackgroundTransparency = 1,
+			Text = label,
+			TextColor3 = theme.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			Parent = row
+		})
+		create("TextLabel", {
+			Position = UDim2.fromOffset(14, 26),
+			Size = UDim2.new(1, -28, 0, 18),
+			BackgroundTransparency = 1,
+			Text = tostring(value),
+			TextColor3 = theme.text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 14,
+			Parent = row
+		})
+	end
+	
 	statRow("Display name", player.DisplayName, 1)
 	statRow("Username", "@" .. player.Name, 2)
 	statRow("User ID", player.UserId, 3)
@@ -1428,11 +1515,13 @@ local function renderHomepage()
 	statRow("Team", player.Team and player.Team.Name or "None", 10)
 	statRow("Walk Speed", state.movementEnabled and tostring(state.walkSpeed) or "Default", 11)
 	statRow("Jump Power", state.movementEnabled and tostring(state.jumpPower) or "Default", 12)
-	statRow("FOV", tostring(state.fov), 13)
-	statRow("ESP Active", state.espEnabled and "Yes" or "No", 14)
-	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 15)
-	statRow("Hitbox Active", state.hitboxEnabled and "Yes (Size: " .. state.hitboxSize .. ")" or "No", 16)
-	statRow("Hitbox Team Check", state.hitboxTeamCheck and "Yes" or "No", 17)
+	statRow("Infinite Jump", state.infiniteJumpEnabled and "Yes" or "No", 13)
+	statRow("Noclip", state.noclipEnabled and "Yes" or "No", 14)
+	statRow("FOV", tostring(state.fov), 15)
+	statRow("ESP Active", state.espEnabled and "Yes" or "No", 16)
+	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 17)
+	statRow("Hitbox Active", state.hitboxEnabled and "Yes (Size: " .. state.hitboxSize .. ")" or "No", 18)
+	statRow("Hitbox Team Check", state.hitboxTeamCheck and "Yes" or "No", 19)
 end
 
 buildGui()
@@ -1513,6 +1602,8 @@ screenGui.Destroying:Connect(function()
 	if espContainer then espContainer:Destroy() end
 	if aimFOVCircle then aimFOVCircle:Remove() end
 	if hitboxUpdateConnection then hitboxUpdateConnection:Disconnect() end
+	if noclipConnection then noclipConnection:Disconnect() end
+	if infiniteJumpConnection then infiniteJumpConnection:Disconnect() end
 	for _, parts in pairs(state.hitboxParts) do
 		for _, part in pairs(parts) do
 			if part then part:Destroy() end
