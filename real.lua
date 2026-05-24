@@ -1,4 +1,4 @@
-add infinite jump to movement which lets me jump in air and also make the aim much more subtle if configured to be subtle , local Players = game:GetService("Players")
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
