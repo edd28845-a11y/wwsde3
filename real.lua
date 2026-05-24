@@ -3,6 +3,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -81,7 +82,13 @@ local state = {
 	currentTarget = nil,
 	currentTargetPart = nil,
 	aimSubtle = false,
-	aimSubtleStrength = 0.92
+	aimSubtleStrength = 0.92,
+	-- Auto shoot settings
+	autoShootEnabled = false,
+	autoShootDelay = 0.15,
+	autoShootMinDistance = 100,
+	lastShootTime = 0,
+	currentTool = nil
 }
 
 local theme = {
@@ -204,12 +211,12 @@ local espUpdateConnection
 local aimFOVCircle
 local aimTargetHighlight
 local aimSubtleToggle
+local autoShootToggle
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
 
 -- Infinite jump state
 local jumpConnection
-local currentVelocity = Vector3.zero
 
 local function create(className, props, children)
 	local item = Instance.new(className)
@@ -461,6 +468,7 @@ local function renderHomepage()
 	statRow("FOV", tostring(state.fov), 14)
 	statRow("ESP Active", state.espEnabled and "Yes" or "No", 15)
 	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 16)
+	statRow("Auto Shoot", state.autoShootEnabled and "Enabled" or "Disabled", 17)
 end
 
 local function applyWatermark()
@@ -528,7 +536,6 @@ local function setupInfiniteJump()
 				if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Dead then
 					local rootPart = character:FindFirstChild("HumanoidRootPart")
 					if rootPart then
-						-- Only allow jump if not already jumping upward too fast
 						local verticalVelocity = rootPart.Velocity.Y
 						if verticalVelocity < state.jumpPower * 0.5 then
 							rootPart.Velocity = Vector3.new(rootPart.Velocity.X, state.jumpPower, rootPart.Velocity.Z)
@@ -571,6 +578,58 @@ end
 local function applyFOV()
 	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = state.fov end
+end
+
+-- Auto shoot function
+local function attemptAutoShoot()
+	if not state.autoShootEnabled then return end
+	if not state.currentTarget or not state.currentTargetPart then return end
+	
+	local character = player.Character
+	if not character then return end
+	
+	local tool = character:FindFirstChildOfClass("Tool")
+	if not tool then return end
+	
+	-- Check cooldown
+	local currentTime = tick()
+	if currentTime - state.lastShootTime < state.autoShootDelay then return end
+	
+	-- Check distance to target
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	
+	local targetPos = state.currentTargetPart.Position
+	local distance = (cam.CFrame.Position - targetPos).Magnitude
+	
+	if distance <= state.autoShootMinDistance then
+		-- Check if target is on screen
+		local screenPos = cam:WorldToViewportPoint(targetPos)
+		if screenPos.Z > 0 then
+			-- Check if aim is close enough to target
+			local mousePos = Vector2.new(mouse.X, mouse.Y)
+			local targetScreenPos = Vector2.new(screenPos.X, screenPos.Y)
+			local aimPrecision = (mousePos - targetScreenPos).Magnitude
+			
+			-- Only auto-shoot if aim is within 10% of FOV radius
+			if aimPrecision <= state.aimFOV * 0.1 then
+				-- Attempt to fire the tool
+				local success, err = pcall(function()
+					if tool:IsA("Tool") then
+						tool:Activate()
+						state.lastShootTime = currentTime
+						
+						-- Deactivate after a brief moment for semi-auto weapons
+						task.delay(0.05, function()
+							if tool and tool.Parent then
+								tool:Deactivate()
+							end
+						end)
+					end
+				end)
+			end
+		end
+	end
 end
 
 local function checkWall(targetCharacter)
@@ -703,14 +762,24 @@ local function updateAim()
 					local targetCFrame = CFrame.new(cam.CFrame.Position, predictedPosition)
 					
 					if state.aimSubtle then
-						-- Ultra-subtle aim: extremely smooth, almost imperceptible movement
+						-- Ultra-subtle aim with auto-shoot support
 						local currentLook = cam.CFrame.LookVector
 						local targetLook = targetCFrame.LookVector
 						local interpolatedLook = currentLook:Lerp(targetLook, 1 - state.aimSubtleStrength)
 						cam.CFrame = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + interpolatedLook)
+						
+						-- Only auto-shoot when in subtle mode for maximum stealth
+						if state.autoShootEnabled then
+							attemptAutoShoot()
+						end
 					else
 						-- Normal aim with configurable smoothness
 						cam.CFrame = cam.CFrame:Lerp(targetCFrame, 1 - state.aimSmoothness)
+						
+						-- Auto-shoot for normal aim if enabled
+						if state.autoShootEnabled then
+							attemptAutoShoot()
+						end
 					end
 				end
 			end
@@ -998,7 +1067,7 @@ local function renderAim()
 	clearContent()
 	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
-	sectionHeader("aimbot", "Camera-based aimbot that locks onto targets within FOV. Enable subtle mode for undetectable aim.", contentFrame)
+	sectionHeader("aimbot", "Camera-based aimbot with subtle mode and auto-shoot support.", contentFrame)
 	
 	local aimToggle = settingsButton("AIMBOT: DISABLED", contentFrame)
 	aimToggle.Text = state.aimEnabled and "AIMBOT: ENABLED" or "AIMBOT: DISABLED"
@@ -1055,6 +1124,23 @@ local function renderAim()
 		subtleAimButton.TextColor3 = state.aimSubtle and Color3.fromRGB(8, 8, 11) or theme.text
 	end)
 	
+	-- Auto shoot toggle and settings
+	local autoShootRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
+	corner(autoShootRow, 14)
+	stroke(autoShootRow, theme.stroke, 0.55)
+	autoShootToggle = create("TextButton", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), BackgroundColor3 = state.autoShootEnabled and state.accent or theme.card2, AutoButtonColor = false, Text = "Auto Shoot: " .. (state.autoShootEnabled and "ON" or "OFF"), TextColor3 = state.autoShootEnabled and Color3.fromRGB(8, 8, 11) or theme.text, Font = Enum.Font.GothamSemibold, TextSize = 12, Parent = autoShootRow })
+	corner(autoShootToggle, 10)
+	stroke(autoShootToggle, theme.stroke, 0.6)
+	autoShootToggle.MouseButton1Click:Connect(function()
+		state.autoShootEnabled = not state.autoShootEnabled
+		autoShootToggle.Text = "Auto Shoot: " .. (state.autoShootEnabled and "ON" or "OFF")
+		autoShootToggle.BackgroundColor3 = state.autoShootEnabled and state.accent or theme.card2
+		autoShootToggle.TextColor3 = state.autoShootEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end)
+	
+	local autoShootDelayInput = labeledInput("shoot delay", "Delay between shots (0.05-2.0)", contentFrame)
+	autoShootDelayInput.Text = tostring(state.autoShootDelay)
+	
 	local optionsRow = create("Frame", { Size = UDim2.new(1, -14, 0, 180), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
 	corner(optionsRow, 14)
 	stroke(optionsRow, theme.stroke, 0.55)
@@ -1109,11 +1195,16 @@ local function renderAim()
 		local minHp = tonumber(minHealthInput.Text)
 		state.aimMinHealth = math.clamp(minHp or state.aimMinHealth, 0, 100)
 		
+		-- Auto shoot settings
+		local shootDelay = tonumber(autoShootDelayInput.Text)
+		state.autoShootDelay = math.clamp(shootDelay or state.autoShootDelay, 0.05, 2.0)
+		
 		aimKeyInput.Text = state.aimKeyString
 		smoothnessInput.Text = tostring(state.aimSmoothness)
 		aimFOVInput.Text = tostring(state.aimFOV)
 		predictionInput.Text = tostring(state.aimPrediction)
 		minHealthInput.Text = tostring(state.aimMinHealth)
+		autoShootDelayInput.Text = tostring(state.autoShootDelay)
 	end)
 end
 
