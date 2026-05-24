@@ -8,8 +8,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local state = {
-	password = "onyxontop!",
-	authenticated = false,
+	authenticated = true,
 	minimized = false,
 	visible = true,
 	activeTab = "Homepage",
@@ -36,7 +35,6 @@ local state = {
 	panelWidth = 640,
 	panelHeight = 500,
 	panelTransparency = 0,
-	typedPassword = "",
 	dragging = false,
 	dragStart = nil,
 	startPosition = nil,
@@ -45,6 +43,8 @@ local state = {
 	movementEnabled = false,
 	walkSpeed = 16,
 	jumpPower = 50,
+	infiniteJumpEnabled = false,
+	noclipEnabled = false,
 	-- Visuals settings
 	fov = 70,
 	espEnabled = false,
@@ -78,7 +78,13 @@ local state = {
 	aimRainbowHue = 0,
 	aiming = false,
 	currentTarget = nil,
-	currentTargetPart = nil
+	currentTargetPart = nil,
+	-- Hitbox settings
+	hitboxEnabled = false,
+	hitboxSize = 10,
+	hitboxTeamCheck = true,
+	hitboxPlayers = {},
+	hitboxParts = {}
 }
 
 local theme = {
@@ -156,20 +162,13 @@ local screenGui
 local panel
 local backdrop
 local body
-local authView
 local appView
-local statusTitle
-local statusText
-local passwordInput
-local submitButton
-local spinner
 local sidebarButtons = {}
 local contentFrame
 local watermarkLabel
 local accentPreview
 local watermarkToggle
 local watermarkInput
-local newPasswordInput
 local logoInput
 local titleInput
 local logoTextLabel
@@ -190,6 +189,8 @@ local panelTransparencyInput
 local movementToggle
 local walkSpeedInput
 local jumpPowerInput
+local infiniteJumpToggle
+local noclipToggle
 local fovInput
 local espToggle
 local espColorPreview
@@ -199,8 +200,15 @@ local espObjects = {}
 local espUpdateConnection
 local aimFOVCircle
 local aimTargetHighlight
+local hitboxToggle
+local hitboxSizeInput
+local hitboxTeamCheckToggle
+local hitboxUpdateConnection
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
+
+local noclipConnection
+local infiniteJumpConnection
 
 local function create(className, props, children)
 	local item = Instance.new(className)
@@ -326,10 +334,6 @@ local function openPanelSize()
 	return UDim2.fromOffset(state.panelWidth, state.panelHeight)
 end
 
-local function authPanelSize()
-	return UDim2.fromOffset(430, 320)
-end
-
 local function applyPanelStyle()
 	if panel then panel.BackgroundTransparency = state.panelTransparency end
 end
@@ -358,99 +362,6 @@ local function updatePanelScale()
 	local viewport = cam.ViewportSize
 	local scale = math.min(1, (viewport.X - 24) / math.max(state.panelWidth, 430), (viewport.Y - 24) / math.max(state.panelHeight, 320))
 	panelScale.Scale = math.clamp(scale, 0.68, 1)
-end
-
-local function startSpinner()
-	if state.spinnerConnection then state.spinnerConnection:Disconnect() end
-	state.spinnerConnection = RunService.RenderStepped:Connect(function(delta)
-		if spinner and spinner.Visible then spinner.Rotation = (spinner.Rotation + delta * 360) % 360 end
-	end)
-end
-
-local function stopSpinner()
-	if state.spinnerConnection then state.spinnerConnection:Disconnect(); state.spinnerConnection = nil end
-end
-
-local function setStatus(kind, heading, message)
-	statusTitle.Text = heading
-	statusText.Text = message
-	spinner.Visible = kind == "loading"
-	statusTitle.Position = kind == "loading" and UDim2.fromOffset(54, 8) or UDim2.fromOffset(16, 8)
-	statusText.Position = kind == "loading" and UDim2.fromOffset(54, 30) or UDim2.fromOffset(16, 30)
-	if kind == "error" then
-		statusTitle.TextColor3 = theme.error
-		statusTitle.Parent.UIStroke.Color = theme.error
-	elseif kind == "success" then
-		statusTitle.TextColor3 = theme.success
-		statusTitle.Parent.UIStroke.Color = theme.success
-	elseif kind == "loading" then
-		statusTitle.TextColor3 = state.accent
-		statusTitle.Parent.UIStroke.Color = state.accent
-	else
-		statusTitle.TextColor3 = theme.text
-		statusTitle.Parent.UIStroke.Color = theme.stroke
-	end
-end
-
-local function clearContent()
-	for _, child in ipairs(contentFrame:GetChildren()) do child:Destroy() end
-end
-
-local function statRow(label, value, order)
-	local row = create("Frame", {
-		Name = label:gsub("%s+", "") .. "Row",
-		Size = UDim2.new(1, -14, 0, 52),
-		BackgroundColor3 = theme.card,
-		BorderSizePixel = 0,
-		LayoutOrder = order,
-		Parent = contentFrame
-	})
-	corner(row, 12)
-	stroke(row, theme.stroke, 0.55)
-	create("TextLabel", {
-		Position = UDim2.fromOffset(14, 8),
-		Size = UDim2.new(1, -28, 0, 15),
-		BackgroundTransparency = 1,
-		Text = label,
-		TextColor3 = theme.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		Parent = row
-	})
-	create("TextLabel", {
-		Position = UDim2.fromOffset(14, 26),
-		Size = UDim2.new(1, -28, 0, 18),
-		BackgroundTransparency = 1,
-		Text = tostring(value),
-		TextColor3 = theme.text,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 14,
-		Parent = row
-	})
-end
-
-local function renderHomepage()
-	clearContent()
-	create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
-	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
-	statRow("Display name", player.DisplayName, 1)
-	statRow("Username", "@" .. player.Name, 2)
-	statRow("User ID", player.UserId, 3)
-	statRow("Account age", tostring(player.AccountAge) .. " days", 4)
-	statRow("Membership", player.MembershipType.Name, 5)
-	statRow("Current game", getGameName(), 6)
-	statRow("Place ID", game.PlaceId, 7)
-	statRow("Server", shortJobId(), 8)
-	statRow("Input device", getDeviceText(), 9)
-	statRow("Team", player.Team and player.Team.Name or "None", 10)
-	statRow("Walk Speed", state.movementEnabled and tostring(state.walkSpeed) or "Default", 11)
-	statRow("Jump Power", state.movementEnabled and tostring(state.jumpPower) or "Default", 12)
-	statRow("FOV", tostring(state.fov), 13)
-	statRow("ESP Active", state.espEnabled and "Yes" or "No", 14)
-	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 15)
 end
 
 local function applyWatermark()
@@ -498,10 +409,63 @@ local function applyAccent()
 		local active = button.Name == state.activeTab .. "Tab"
 		tween(button, 0.18, { BackgroundColor3 = active and state.accent or Color3.fromRGB(24, 24, 30), TextColor3 = active and Color3.fromRGB(8, 8, 11) or theme.text })
 	end
-	submitButton.BackgroundColor3 = state.accent
 	applyBranding()
 	applyWatermark()
 	drawCrosshair()
+end
+
+local function updateNoclip()
+	if noclipConnection then noclipConnection:Disconnect(); noclipConnection = nil end
+	
+	if state.noclipEnabled then
+		noclipConnection = RunService.Stepped:Connect(function()
+			local character = player.Character
+			if character then
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = false
+					end
+				end
+			end
+		end)
+	else
+		local character = player.Character
+		if character then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = true
+				end
+			end
+		end
+	end
+	
+	if noclipToggle then
+		noclipToggle.Text = state.noclipEnabled and "NOCLIP: ENABLED" or "NOCLIP: DISABLED"
+		noclipToggle.BackgroundColor3 = state.noclipEnabled and state.accent or theme.card2
+		noclipToggle.TextColor3 = state.noclipEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end
+end
+
+local function updateInfiniteJump()
+	if infiniteJumpConnection then infiniteJumpConnection:Disconnect(); infiniteJumpConnection = nil end
+	
+	if state.infiniteJumpEnabled then
+		infiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
+			local character = player.Character
+			if character then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if humanoid then
+					humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+				end
+			end
+		end)
+	end
+	
+	if infiniteJumpToggle then
+		infiniteJumpToggle.Text = state.infiniteJumpEnabled and "INF JUMP: ENABLED" or "INF JUMP: DISABLED"
+		infiniteJumpToggle.BackgroundColor3 = state.infiniteJumpEnabled and state.accent or theme.card2
+		infiniteJumpToggle.TextColor3 = state.infiniteJumpEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end
 end
 
 local function applyMovement()
@@ -509,8 +473,13 @@ local function applyMovement()
 	if character then
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
-			if state.movementEnabled then humanoid.WalkSpeed = state.walkSpeed; humanoid.JumpPower = state.jumpPower
-			else humanoid.WalkSpeed = 16; humanoid.JumpPower = 50 end
+			if state.movementEnabled then 
+				humanoid.WalkSpeed = state.walkSpeed
+				humanoid.JumpPower = state.jumpPower
+			else 
+				humanoid.WalkSpeed = 16
+				humanoid.JumpPower = 50
+			end
 		end
 	end
 	if movementToggle then
@@ -518,11 +487,110 @@ local function applyMovement()
 		movementToggle.BackgroundColor3 = state.movementEnabled and state.accent or theme.card2
 		movementToggle.TextColor3 = state.movementEnabled and Color3.fromRGB(8, 8, 11) or theme.text
 	end
+	updateNoclip()
+	updateInfiniteJump()
 end
 
 local function applyFOV()
 	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = state.fov end
+end
+
+local function updateHitboxes()
+	if hitboxUpdateConnection then hitboxUpdateConnection:Disconnect(); hitboxUpdateConnection = nil end
+	
+	-- Clean up existing hitbox parts
+	for _, parts in pairs(state.hitboxParts) do
+		for _, part in pairs(parts) do
+			if part then part:Destroy() end
+		end
+	end
+	state.hitboxParts = {}
+	state.hitboxPlayers = {}
+	
+	if not state.hitboxEnabled then return end
+	
+	hitboxUpdateConnection = RunService.RenderStepped:Connect(function()
+		for _, target in ipairs(Players:GetPlayers()) do
+			if target == player then continue end
+			if state.hitboxTeamCheck and target.Team == player.Team then
+				if state.hitboxParts[target.UserId] then
+					for _, part in pairs(state.hitboxParts[target.UserId]) do
+						if part then part:Destroy() end
+					end
+					state.hitboxParts[target.UserId] = nil
+				end
+				continue
+			end
+			
+			local character = target.Character
+			if not character then
+				if state.hitboxParts[target.UserId] then
+					for _, part in pairs(state.hitboxParts[target.UserId]) do
+						if part then part:Destroy() end
+					end
+					state.hitboxParts[target.UserId] = nil
+				end
+				continue
+			end
+			
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if not humanoid or humanoid.Health <= 0 then
+				if state.hitboxParts[target.UserId] then
+					for _, part in pairs(state.hitboxParts[target.UserId]) do
+						if part then part:Destroy() end
+					end
+					state.hitboxParts[target.UserId] = nil
+				end
+				continue
+			end
+			
+			if not state.hitboxParts[target.UserId] then
+				state.hitboxParts[target.UserId] = {}
+			end
+			
+			local bodyParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg", "HumanoidRootPart"}
+			for _, partName in ipairs(bodyParts) do
+				local realPart = character:FindFirstChild(partName)
+				if realPart then
+					local hitboxPart = state.hitboxParts[target.UserId][partName]
+					if not hitboxPart or not hitboxPart.Parent then
+						hitboxPart = Instance.new("Part")
+						hitboxPart.Name = "Hitbox_" .. partName
+						hitboxPart.Anchored = false
+						hitboxPart.CanCollide = true
+						hitboxPart.Massless = true
+						hitboxPart.Transparency = 0.8
+						hitboxPart.BrickColor = BrickColor.new("Bright red")
+						hitboxPart.Material = Enum.Material.Neon
+						hitboxPart.Size = Vector3.new(state.hitboxSize, state.hitboxSize, state.hitboxSize)
+						hitboxPart.Parent = character
+						
+						local weld = Instance.new("WeldConstraint")
+						weld.Part0 = hitboxPart
+						weld.Part1 = realPart
+						weld.Parent = hitboxPart
+						
+						state.hitboxParts[target.UserId][partName] = hitboxPart
+					else
+						hitboxPart.Size = Vector3.new(state.hitboxSize, state.hitboxSize, state.hitboxSize)
+					end
+				end
+			end
+			
+			state.hitboxPlayers[target.UserId] = target
+		end
+		
+		for userId, _ in pairs(state.hitboxParts) do
+			if not Players:GetPlayerByUserId(userId) then
+				for _, part in pairs(state.hitboxParts[userId]) do
+					if part then part:Destroy() end
+				end
+				state.hitboxParts[userId] = nil
+				state.hitboxPlayers[userId] = nil
+			end
+		end
+	end)
 end
 
 local function checkWall(targetCharacter)
@@ -837,10 +905,59 @@ local function labeledInput(label, placeholder, parent)
 	return input
 end
 
+local function renderHitbox()
+	clearContent()
+	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
+	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
+	
+	sectionHeader("hitbox editor", "Set all other players' hitbox sizes to make them easier to hit. Team check ensures teammates are not affected.", contentFrame)
+	
+	hitboxToggle = settingsButton("HITBOX: DISABLED", contentFrame)
+	hitboxToggle.Text = state.hitboxEnabled and "HITBOX: ENABLED" or "HITBOX: DISABLED"
+	hitboxToggle.BackgroundColor3 = state.hitboxEnabled and state.accent or theme.card2
+	hitboxToggle.TextColor3 = state.hitboxEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	
+	hitboxSizeInput = labeledInput("hitbox size", "Size (1-50)", contentFrame)
+	hitboxSizeInput.Text = tostring(state.hitboxSize)
+	
+	local teamCheckRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
+	corner(teamCheckRow, 14)
+	stroke(teamCheckRow, theme.stroke, 0.55)
+	hitboxTeamCheckToggle = create("TextButton", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), BackgroundColor3 = state.hitboxTeamCheck and state.accent or theme.card2, AutoButtonColor = false, Text = "Team Check: " .. (state.hitboxTeamCheck and "ON" or "OFF"), TextColor3 = state.hitboxTeamCheck and Color3.fromRGB(8, 8, 11) or theme.text, Font = Enum.Font.GothamSemibold, TextSize = 12, Parent = teamCheckRow })
+	corner(hitboxTeamCheckToggle, 10)
+	stroke(hitboxTeamCheckToggle, theme.stroke, 0.6)
+	
+	local saveHitbox = settingsButton("APPLY HITBOX SETTINGS", contentFrame)
+	
+	hitboxToggle.MouseButton1Click:Connect(function()
+		state.hitboxEnabled = not state.hitboxEnabled
+		hitboxToggle.Text = state.hitboxEnabled and "HITBOX: ENABLED" or "HITBOX: DISABLED"
+		hitboxToggle.BackgroundColor3 = state.hitboxEnabled and state.accent or theme.card2
+		hitboxToggle.TextColor3 = state.hitboxEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+		updateHitboxes()
+	end)
+	
+	hitboxTeamCheckToggle.MouseButton1Click:Connect(function()
+		state.hitboxTeamCheck = not state.hitboxTeamCheck
+		hitboxTeamCheckToggle.Text = "Team Check: " .. (state.hitboxTeamCheck and "ON" or "OFF")
+		hitboxTeamCheckToggle.BackgroundColor3 = state.hitboxTeamCheck and state.accent or theme.card2
+		hitboxTeamCheckToggle.TextColor3 = state.hitboxTeamCheck and Color3.fromRGB(8, 8, 11) or theme.text
+		updateHitboxes()
+	end)
+	
+	saveHitbox.MouseButton1Click:Connect(function()
+		local size = tonumber(hitboxSizeInput.Text)
+		state.hitboxSize = math.clamp(size or state.hitboxSize, 1, 50)
+		hitboxSizeInput.Text = tostring(state.hitboxSize)
+		updateHitboxes()
+	end)
+end
+
 local function renderMovement()
 	clearContent()
 	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
+	
 	sectionHeader("movement", "Enable custom movement speed and jump power for your character.", contentFrame)
 	movementToggle = settingsButton("MOVEMENT: DISABLED", contentFrame)
 	walkSpeedInput = labeledInput("walk speed", "Walk speed (16-200)", contentFrame)
@@ -848,7 +965,18 @@ local function renderMovement()
 	jumpPowerInput = labeledInput("jump power", "Jump power (50-500)", contentFrame)
 	jumpPowerInput.Text = tostring(state.jumpPower)
 	local saveMovement = settingsButton("APPLY MOVEMENT", contentFrame)
-	movementToggle.MouseButton1Click:Connect(function() state.movementEnabled = not state.movementEnabled; applyMovement() end)
+	
+	sectionHeader("infinite jump", "Jump infinitely in the air with no cooldown between jumps.", contentFrame)
+	infiniteJumpToggle = settingsButton("INF JUMP: DISABLED", contentFrame)
+	
+	sectionHeader("noclip", "Walk through walls and objects. Use with caution.", contentFrame)
+	noclipToggle = settingsButton("NOCLIP: DISABLED", contentFrame)
+	
+	movementToggle.MouseButton1Click:Connect(function() 
+		state.movementEnabled = not state.movementEnabled
+		applyMovement()
+	end)
+	
 	saveMovement.MouseButton1Click:Connect(function()
 		local speed = tonumber(walkSpeedInput.Text)
 		local jump = tonumber(jumpPowerInput.Text)
@@ -858,6 +986,17 @@ local function renderMovement()
 		jumpPowerInput.Text = tostring(state.jumpPower)
 		applyMovement()
 	end)
+	
+	infiniteJumpToggle.MouseButton1Click:Connect(function()
+		state.infiniteJumpEnabled = not state.infiniteJumpEnabled
+		updateInfiniteJump()
+	end)
+	
+	noclipToggle.MouseButton1Click:Connect(function()
+		state.noclipEnabled = not state.noclipEnabled
+		updateNoclip()
+	end)
+	
 	applyMovement()
 end
 
@@ -1048,10 +1187,6 @@ local function renderSettings()
 	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
 
-	sectionHeader("access", "Change the local unlock password used on this client.", contentFrame)
-	newPasswordInput = labeledInput("new password", "New local password", contentFrame)
-	local savePassword = settingsButton("SAVE PASSWORD", contentFrame)
-
 	sectionHeader("branding", "Customize the title and the small mark in the header. Use sparkle for the default mark.", contentFrame)
 	logoInput = labeledInput("logo mark", "Logo text or sparkle", contentFrame)
 	logoInput.Text = state.logoMode == "sparkle" and "sparkle" or state.logoText
@@ -1149,14 +1284,6 @@ local function renderSettings()
 	crosshairThicknessInput.Text = tostring(state.crosshairThickness)
 	local saveCrosshair = settingsButton("SAVE CROSSHAIR SIZE", contentFrame)
 
-	savePassword.MouseButton1Click:Connect(function()
-		local nextPassword = trim(newPasswordInput.Text)
-		if nextPassword == "" then newPasswordInput.PlaceholderText = "Password cannot be empty"; return end
-		state.password = nextPassword
-		newPasswordInput.Text = ""
-		newPasswordInput.PlaceholderText = "Password saved"
-	end)
-
 	saveBranding.MouseButton1Click:Connect(function()
 		local nextLogo = trim(logoInput.Text)
 		local nextTitle = trim(titleInput.Text)
@@ -1207,23 +1334,8 @@ local function switchTab(tabName)
 	elseif tabName == "Movement" then renderMovement()
 	elseif tabName == "Visuals" then renderVisuals()
 	elseif tabName == "Aim" then renderAim()
+	elseif tabName == "Hitbox" then renderHitbox()
 	else renderHomepage() end
-end
-
-local function showMain()
-	state.authenticated = true
-	stopSpinner()
-	setStatus("success", "Access granted", "Opening onyx.")
-	task.delay(0.45, function()
-		if not screenGui.Parent then return end
-		tween(authView, 0.2, { GroupTransparency = 1 })
-		task.wait(0.2)
-		authView.Visible = false
-		appView.Visible = true
-		switchTab("Homepage")
-		tween(appView, 0.24, { GroupTransparency = 0 })
-		tween(panel, 0.24, { Size = openPanelSize() })
-	end)
 end
 
 setInterfaceVisible = function(visible)
@@ -1240,21 +1352,6 @@ setInterfaceVisible = function(visible)
 		tween(backdrop, 0.18, { BackgroundTransparency = 1 })
 		task.delay(0.18, function() if not state.visible and panel and backdrop then panel.Visible = false; backdrop.Visible = false end end)
 	end
-end
-
-local function submitPassword()
-	local typed = trim(passwordInput.Text)
-	if typed == "" then setStatus("error", "Access denied", "Enter the password first."); return end
-	submitButton.Active = false
-	submitButton.Text = "CHECKING"
-	setStatus("loading", "Checking password", "Loading onyx.")
-	startSpinner()
-	task.delay(0.9, function()
-		submitButton.Active = true
-		submitButton.Text = "SUBMIT"
-		if typed == state.password then showMain()
-		else stopSpinner(); setStatus("error", "Access denied", "The password is incorrect.") end
-	end)
 end
 
 local function buildHeader()
@@ -1284,7 +1381,7 @@ local function buildHeader()
 	minimizeButton.MouseButton1Click:Connect(function()
 		state.minimized = not state.minimized
 		if state.minimized then body.Visible = false; minimizeButton.Text = "+"; tween(panel, 0.2, { Size = UDim2.fromOffset(430, 58) })
-		else body.Visible = true; minimizeButton.Text = "-"; tween(panel, 0.2, { Size = state.authenticated and openPanelSize() or authPanelSize() }) end
+		else body.Visible = true; minimizeButton.Text = "-"; tween(panel, 0.2, { Size = openPanelSize() }) end
 	end)
 	header.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1294,29 +1391,8 @@ local function buildHeader()
 	end)
 end
 
-local function buildAuth()
-	authView = create("CanvasGroup", { Name = "AuthView", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, GroupTransparency = 0, Parent = body })
-	local passwordShell
-	passwordInput, passwordShell = textInput("PasswordInput", "Enter password", authView)
-	passwordShell.Position = UDim2.fromOffset(0, 6)
-	passwordShell.Size = UDim2.new(1, 0, 0, 50)
-	submitButton = create("TextButton", { Name = "SubmitButton", Position = UDim2.fromOffset(0, 74), Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = state.accent, AutoButtonColor = false, Text = "SUBMIT", TextColor3 = Color3.fromRGB(8, 8, 11), Font = Enum.Font.GothamSemibold, TextSize = 14, Parent = authView })
-	corner(submitButton, 16)
-	stroke(submitButton, Color3.fromRGB(255, 255, 255), 0.82)
-	local statusCard = create("Frame", { Position = UDim2.fromOffset(0, 138), Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = authView })
-	corner(statusCard, 16)
-	stroke(statusCard, theme.stroke, 0.45)
-	spinner = create("Frame", { Position = UDim2.fromOffset(18, 18), Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, Visible = false, Parent = statusCard })
-	local dot = create("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0), Size = UDim2.fromOffset(4, 10), BackgroundColor3 = state.accent, BorderSizePixel = 0, Parent = spinner })
-	corner(dot, 3)
-	statusTitle = create("TextLabel", { Position = UDim2.fromOffset(16, 8), Size = UDim2.new(1, -32, 0, 20), BackgroundTransparency = 1, Text = "Ready", TextColor3 = theme.text, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamSemibold, TextSize = 14, Parent = statusCard })
-	statusText = create("TextLabel", { Position = UDim2.fromOffset(16, 30), Size = UDim2.new(1, -32, 0, 18), BackgroundTransparency = 1, Text = "Enter the local password.", TextColor3 = theme.muted, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.Gotham, TextSize = 12, Parent = statusCard })
-	submitButton.MouseButton1Click:Connect(submitPassword)
-	passwordInput.FocusLost:Connect(function(enterPressed) if enterPressed then submitPassword() end end)
-end
-
 local function buildApp()
-	appView = create("CanvasGroup", { Name = "AppView", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, GroupTransparency = 1, Visible = false, Parent = body })
+	appView = create("CanvasGroup", { Name = "AppView", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, GroupTransparency = 0, Visible = true, Parent = body })
 	local sidebar = create("Frame", { Name = "Sidebar", Size = UDim2.new(0, 144, 1, 0), BackgroundColor3 = theme.sidebar, BorderSizePixel = 0, Parent = appView })
 	corner(sidebar, 14)
 	stroke(sidebar, theme.stroke, 0.55)
@@ -1334,10 +1410,11 @@ local function buildApp()
 	end
 	
 	tab("Homepage", 1)
-	tab("Movement", 2)
-	tab("Visuals", 3)
-	tab("Aim", 4)
-	tab("Settings", 5)
+	tab("Hitbox", 2)
+	tab("Movement", 3)
+	tab("Visuals", 4)
+	tab("Aim", 5)
+	tab("Settings", 6)
 	
 	contentFrame = create("ScrollingFrame", { Name = "Content", Position = UDim2.fromOffset(164, 0), Size = UDim2.new(1, -164, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4, CanvasSize = UDim2.fromOffset(0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = appView })
 end
@@ -1367,7 +1444,7 @@ local function buildGui()
 	
 	crosshairFrame = create("Frame", { Name = "Crosshair", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(state.crosshairSize * 2, state.crosshairSize * 2), BackgroundTransparency = 1, Visible = false, Parent = screenGui })
 	
-	panel = create("CanvasGroup", { Name = "OnyxPanel", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = authPanelSize(), BackgroundColor3 = theme.panel, BorderSizePixel = 0, GroupTransparency = 0, Parent = screenGui })
+	panel = create("CanvasGroup", { Name = "OnyxPanel", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = openPanelSize(), BackgroundColor3 = theme.panel, BorderSizePixel = 0, GroupTransparency = 0, Parent = screenGui })
 	corner(panel, 16)
 	stroke(panel, theme.stroke, 0.08)
 	panelScale = create("UIScale", { Scale = 1, Parent = panel })
@@ -1375,7 +1452,6 @@ local function buildGui()
 	
 	buildHeader()
 	body = create("Frame", { Name = "Body", Position = UDim2.fromOffset(34, 86), Size = UDim2.new(1, -68, 1, -120), BackgroundTransparency = 1, Parent = panel })
-	buildAuth()
 	buildApp()
 	applyPanelStyle()
 	applyAccent()
@@ -1383,6 +1459,69 @@ local function buildGui()
 	applyFOV()
 	drawCrosshair()
 	updatePanelScale()
+	switchTab("Homepage")
+end
+
+local function renderHomepage()
+	clearContent()
+	create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
+	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
+	
+	local function statRow(label, value, order)
+		local row = create("Frame", {
+			Name = label:gsub("%s+", "") .. "Row",
+			Size = UDim2.new(1, -14, 0, 52),
+			BackgroundColor3 = theme.card,
+			BorderSizePixel = 0,
+			LayoutOrder = order,
+			Parent = contentFrame
+		})
+		corner(row, 12)
+		stroke(row, theme.stroke, 0.55)
+		create("TextLabel", {
+			Position = UDim2.fromOffset(14, 8),
+			Size = UDim2.new(1, -28, 0, 15),
+			BackgroundTransparency = 1,
+			Text = label,
+			TextColor3 = theme.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			Parent = row
+		})
+		create("TextLabel", {
+			Position = UDim2.fromOffset(14, 26),
+			Size = UDim2.new(1, -28, 0, 18),
+			BackgroundTransparency = 1,
+			Text = tostring(value),
+			TextColor3 = theme.text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 14,
+			Parent = row
+		})
+	end
+	
+	statRow("Display name", player.DisplayName, 1)
+	statRow("Username", "@" .. player.Name, 2)
+	statRow("User ID", player.UserId, 3)
+	statRow("Account age", tostring(player.AccountAge) .. " days", 4)
+	statRow("Membership", player.MembershipType.Name, 5)
+	statRow("Current game", getGameName(), 6)
+	statRow("Place ID", game.PlaceId, 7)
+	statRow("Server", shortJobId(), 8)
+	statRow("Input device", getDeviceText(), 9)
+	statRow("Team", player.Team and player.Team.Name or "None", 10)
+	statRow("Walk Speed", state.movementEnabled and tostring(state.walkSpeed) or "Default", 11)
+	statRow("Jump Power", state.movementEnabled and tostring(state.jumpPower) or "Default", 12)
+	statRow("Infinite Jump", state.infiniteJumpEnabled and "Yes" or "No", 13)
+	statRow("Noclip", state.noclipEnabled and "Yes" or "No", 14)
+	statRow("FOV", tostring(state.fov), 15)
+	statRow("ESP Active", state.espEnabled and "Yes" or "No", 16)
+	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 17)
+	statRow("Hitbox Active", state.hitboxEnabled and "Yes (Size: " .. state.hitboxSize .. ")" or "No", 18)
+	statRow("Hitbox Team Check", state.hitboxTeamCheck and "Yes" or "No", 19)
 end
 
 buildGui()
@@ -1410,10 +1549,7 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
-	if input.KeyCode == Enum.KeyCode.Insert then setInterfaceVisible(not state.visible)
-	elseif input.KeyCode == Enum.KeyCode.Tab and screenGui.Enabled then
-		if passwordInput and not state.authenticated then passwordInput:CaptureFocus() end
-	end
+	if input.KeyCode == Enum.KeyCode.Insert then setInterfaceVisible(not state.visible) end
 	
 	if state.aimEnabled then
 		if state.aimRequireKey then
@@ -1455,22 +1591,22 @@ end)
 player.CharacterAdded:Connect(function()
 	applyMovement()
 	applyFOV()
-	if state.authenticated then
-		panel.Visible = state.visible
-		backdrop.Visible = state.visible
-		authView.Visible = false
-		appView.Visible = true
-		appView.GroupTransparency = 0
-		switchTab(state.activeTab)
-		applyWatermark()
-		drawCrosshair()
-	end
+	applyWatermark()
+	drawCrosshair()
 	updateESP()
+	updateHitboxes()
 end)
 
 screenGui.Destroying:Connect(function()
-	stopSpinner()
 	if espUpdateConnection then espUpdateConnection:Disconnect() end
 	if espContainer then espContainer:Destroy() end
 	if aimFOVCircle then aimFOVCircle:Remove() end
+	if hitboxUpdateConnection then hitboxUpdateConnection:Disconnect() end
+	if noclipConnection then noclipConnection:Disconnect() end
+	if infiniteJumpConnection then infiniteJumpConnection:Disconnect() end
+	for _, parts in pairs(state.hitboxParts) do
+		for _, part in pairs(parts) do
+			if part then part:Destroy() end
+		end
+	end
 end)
