@@ -1,4 +1,3 @@
--- Secure Onyx Script - Undetectable Version
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -7,7 +6,6 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Use getrenv() or alternative methods to avoid detection
 local function getService(name)
     local success, service = pcall(function()
         return game:GetService(name)
@@ -15,7 +13,6 @@ local function getService(name)
     return success and service or nil
 end
 
--- Secure drawing methods (avoid Drawing.new which is detected)
 local function createDrawing(className)
     local success, drawing = pcall(function()
         return Drawing.new(className)
