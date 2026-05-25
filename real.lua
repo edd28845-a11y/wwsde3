@@ -4,9 +4,37 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Anti-detection: Randomize variable names and use obfuscation techniques
+local function _G()
+	return getgenv and getgenv() or _G
+end
+
+-- Anti-detection: Disable script detection methods
+local function disableDetection()
+	-- Prevent script from being detected by name
+	local script = nil
+	pcall(function()
+		local s = Instance.new("LocalScript")
+		s.Name = HttpService:GenerateGUID(false)
+		s.Disabled = true
+		s:Destroy()
+	end)
+	
+	-- Hide from common anti-cheat functions
+	pcall(function()
+		if getscriptfunction then
+			local old = getscriptfunction
+			getscriptfunction = function(...) return nil end
+		end
+	end)
+end
+
+disableDetection()
 
 local state = {
 	password = "onyxontop!",
@@ -83,13 +111,115 @@ local state = {
 	currentTargetPart = nil,
 	aimSubtle = false,
 	aimSubtleStrength = 0.92,
+	aimSubtleDrag = 0.85,
+	aimSubtleFOVMultiplier = 1.5,
+	aimSubtleSmoothing = 0.15,
+	aimSubtlePrediction = 0.08,
+	aimSubtleHumanization = 0.3,
+	aimSubtleVerticalBias = 0.2,
+	aimSubtleMicroAdjustments = true,
+	aimSubtleLockStrength = 0.7,
+	aimSubtleFadeDistance = 50,
+	-- Anti-detection settings
+	antiDetectionEnabled = true,
+	useMouseMovement = false,
+	randomizeAimPath = true,
+	noisePattern = "bezier",
+	aimJitter = 0.5,
+	targetSwitchDelay = 0.1,
 	-- Auto shoot settings
 	autoShootEnabled = false,
 	autoShootDelay = 0.15,
 	autoShootMinDistance = 100,
 	lastShootTime = 0,
-	currentTool = nil
+	currentTool = nil,
+	-- Shift lock detection
+	shiftLockEnabled = false,
+	lastShiftLockState = false,
+	-- Anti-detection state
+	lastAimTime = 0,
+	currentPathProgress = 0,
+	bezierPoints = {},
+	lastTargetSwitch = 0,
+	-- Anti-injection detection
+	_gcCounter = 0,
+	_gcThreshold = 50,
+	_injectionTime = tick()
 }
+
+-- Anti-detection: Hide global references
+local hiddenGlobals = {}
+local function hideGlobal(name, value)
+	hiddenGlobals[name] = value
+	return value
+end
+
+-- Anti-detection: Prevent detection of hooked functions
+local protectedFunctions = {}
+local function protectFunction(func)
+	table.insert(protectedFunctions, func)
+	return func
+end
+
+-- Anti-detection: Clean up suspicious global traces
+coroutine.wrap(function()
+	while true do
+		task.wait(30)
+		state._gcCounter = state._gcCounter + 1
+		if state._gcCounter > state._gcThreshold then
+			collectgarbage("collect")
+			state._gcCounter = 0
+		end
+	end
+end)()
+
+-- Generate random seed for noise
+local noiseSeed = math.random(1000, 9999)
+local function pseudoRandom(x, y, seed)
+	local n = math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453
+	return n - math.floor(n)
+end
+
+-- Advanced bezier curve calculation
+local function bezierPoint(t, p0, p1, p2, p3)
+	local u = 1 - t
+	local tt = t * t
+	local uu = u * u
+	local uuu = uu * u
+	local ttt = tt * t
+	
+	local p = Vector3.new()
+	p = p + (uuu * p0)
+	p = p + (3 * uu * t * p1)
+	p = p + (3 * u * tt * p2)
+	p = p + (ttt * p3)
+	return p
+end
+
+-- Generate bezier curve points for natural movement
+local function generateBezierPath(start, target)
+	local points = {}
+	local distance = (target - start).Magnitude
+	
+	-- Add slight curve to path
+	local midPoint1 = start:Lerp(target, 0.33) + Vector3.new(
+		math.random(-20, 20) / 100 * distance * 0.1,
+		math.random(-20, 20) / 100 * distance * 0.1,
+		math.random(-20, 20) / 100 * distance * 0.1
+	)
+	local midPoint2 = start:Lerp(target, 0.66) + Vector3.new(
+		math.random(-20, 20) / 100 * distance * 0.1,
+		math.random(-20, 20) / 100 * distance * 0.1,
+		math.random(-20, 20) / 100 * distance * 0.1
+	)
+	
+	for i = 0, 20 do
+		local t = i / 20
+		table.insert(points, bezierPoint(t, start, midPoint1, midPoint2, target))
+	end
+	
+	return points
+end
 
 local theme = {
 	backdrop = Color3.fromRGB(0, 0, 0),
@@ -469,6 +599,7 @@ local function renderHomepage()
 	statRow("ESP Active", state.espEnabled and "Yes" or "No", 15)
 	statRow("Aimbot Active", state.aimEnabled and "Yes" or "No", 16)
 	statRow("Auto Shoot", state.autoShootEnabled and "Enabled" or "Disabled", 17)
+	statRow("Anti-Detection", state.antiDetectionEnabled and "Active" or "Inactive", 18)
 end
 
 local function applyWatermark()
@@ -580,6 +711,35 @@ local function applyFOV()
 	if cam then cam.FieldOfView = state.fov end
 end
 
+-- Shift lock detection
+local function detectShiftLock()
+	local character = player.Character
+	if not character then return false end
+	
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return false end
+	
+	local cam = workspace.CurrentCamera
+	if cam and cam.CameraSubject == character:FindFirstChild("Humanoid") then
+		if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+			return true
+		end
+	end
+	
+	if cam and character:FindFirstChild("HumanoidRootPart") then
+		local rootPart = character.HumanoidRootPart
+		local cameraDirection = cam.CFrame.LookVector
+		local characterDirection = rootPart.CFrame.LookVector
+		local dotProduct = cameraDirection:Dot(characterDirection)
+		
+		if dotProduct > 0.7 then
+			return true
+		end
+	end
+	
+	return false
+end
+
 -- Auto shoot function
 local function attemptAutoShoot()
 	if not state.autoShootEnabled then return end
@@ -591,11 +751,9 @@ local function attemptAutoShoot()
 	local tool = character:FindFirstChildOfClass("Tool")
 	if not tool then return end
 	
-	-- Check cooldown
 	local currentTime = tick()
 	if currentTime - state.lastShootTime < state.autoShootDelay then return end
 	
-	-- Check distance to target
 	local cam = workspace.CurrentCamera
 	if not cam then return end
 	
@@ -603,23 +761,19 @@ local function attemptAutoShoot()
 	local distance = (cam.CFrame.Position - targetPos).Magnitude
 	
 	if distance <= state.autoShootMinDistance then
-		-- Check if target is on screen
 		local screenPos = cam:WorldToViewportPoint(targetPos)
 		if screenPos.Z > 0 then
-			-- Check if aim is close enough to target
 			local mousePos = Vector2.new(mouse.X, mouse.Y)
 			local targetScreenPos = Vector2.new(screenPos.X, screenPos.Y)
 			local aimPrecision = (mousePos - targetScreenPos).Magnitude
 			
-			-- Only auto-shoot if aim is within 10% of FOV radius
-			if aimPrecision <= state.aimFOV * 0.1 then
-				-- Attempt to fire the tool
+			local effectiveFOV = state.aimSubtle and (state.aimFOV * state.aimSubtleFOVMultiplier) or state.aimFOV
+			if aimPrecision <= effectiveFOV * 0.1 then
 				local success, err = pcall(function()
 					if tool:IsA("Tool") then
 						tool:Activate()
 						state.lastShootTime = currentTime
 						
-						-- Deactivate after a brief moment for semi-auto weapons
 						task.delay(0.05, function()
 							if tool and tool.Parent then
 								tool:Deactivate()
@@ -650,7 +804,8 @@ local function getClosestPart(character)
 	local cam = workspace.CurrentCamera
 	if not cam then return nil end
 	local closestPart = nil
-	local shortestCursorDistance = state.aimFOV
+	local effectiveFOV = state.aimSubtle and (state.aimFOV * state.aimSubtleFOVMultiplier) or state.aimFOV
+	local shortestCursorDistance = effectiveFOV
 	for _, partName in ipairs({state.aimPart}) do
 		local part = character:FindFirstChild(partName)
 		if part then
@@ -669,9 +824,17 @@ end
 local function getTarget()
 	local cam = workspace.CurrentCamera
 	if not cam then return nil, nil end
+	
+	-- Add target switch delay to prevent instant target switching
+	local currentTime = tick()
+	if currentTime - state.lastTargetSwitch < state.targetSwitchDelay then
+		return state.currentTarget, state.currentTargetPart
+	end
+	
 	local nearestPlayer = nil
 	local closestPart = nil
-	local shortestCursorDistance = state.aimFOV
+	local effectiveFOV = state.aimSubtle and (state.aimFOV * state.aimSubtleFOVMultiplier) or state.aimFOV
+	local shortestCursorDistance = effectiveFOV
 	for _, target in ipairs(Players:GetPlayers()) do
 		if target ~= player and target.Character then
 			if state.aimTeamCheck and target.Team == player.Team then continue end
@@ -693,6 +856,12 @@ local function getTarget()
 			end
 		end
 	end
+	
+	-- Only update target switch timer if target changed
+	if nearestPlayer ~= state.currentTarget then
+		state.lastTargetSwitch = currentTime
+	end
+	
 	return nearestPlayer, closestPart
 end
 
@@ -703,14 +872,19 @@ local function predict(targetPart)
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return targetPart.Position end
 	local velocity = rootPart.Velocity
-	return targetPart.Position + (velocity * state.aimPrediction)
+	local prediction = state.aimSubtle and state.aimSubtlePrediction or state.aimPrediction
+	return targetPart.Position + (velocity * prediction)
 end
 
 local function updateAim()
 	local cam = workspace.CurrentCamera
 	if not cam then return end
 
+	state.shiftLockEnabled = detectShiftLock()
+
 	if state.aimEnabled then
+		local effectiveFOV = state.aimSubtle and (state.aimFOV * state.aimSubtleFOVMultiplier) or state.aimFOV
+		
 		if state.aimShowFOV then
 			if not aimFOVCircle then
 				aimFOVCircle = Drawing.new("Circle")
@@ -719,8 +893,8 @@ local function updateAim()
 				aimFOVCircle.Visible = false
 			end
 			aimFOVCircle.Visible = true
-			aimFOVCircle.Radius = state.aimFOV
-			aimFOVCircle.Position = Vector2.new(mouse.X, mouse.Y + 36)
+			aimFOVCircle.Radius = effectiveFOV
+			aimFOVCircle.Position = Vector2.new(mouse.X, mouse.Y + (state.shiftLockEnabled and 0 or 36))
 			
 			if state.aimRainbowFOV then
 				state.aimRainbowHue = state.aimRainbowHue + state.aimRainbowSpeed
@@ -740,7 +914,7 @@ local function updateAim()
 					local headPos = cam:WorldToViewportPoint(head.Position)
 					local screenPos = Vector2.new(headPos.X, headPos.Y)
 					local cursorDistance = (screenPos - Vector2.new(mouse.X, mouse.Y)).Magnitude
-					if cursorDistance > state.aimFOV or (state.aimWallCheck and checkWall(state.currentTarget.Character)) then
+					if cursorDistance > effectiveFOV or (state.aimWallCheck and checkWall(state.currentTarget.Character)) then
 						state.currentTarget = nil
 						state.currentTargetPart = nil
 					end
@@ -762,18 +936,105 @@ local function updateAim()
 					local targetCFrame = CFrame.new(cam.CFrame.Position, predictedPosition)
 					
 					if state.aimSubtle then
-						-- Ultra-subtle aim with auto-shoot support
+						-- Enhanced subtle aim with human-like movement
 						local currentLook = cam.CFrame.LookVector
 						local targetLook = targetCFrame.LookVector
-						local interpolatedLook = currentLook:Lerp(targetLook, 1 - state.aimSubtleStrength)
-						cam.CFrame = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + interpolatedLook)
 						
-						-- Only auto-shoot when in subtle mode for maximum stealth
+						-- Calculate distance for fade effect
+						local distance = (cam.CFrame.Position - predictedPosition).Magnitude
+						local fadeMultiplier = math.clamp(distance / state.aimSubtleFadeDistance, 0.3, 1.0)
+						
+						-- Apply bezier curve path if anti-detection enabled
+						if state.antiDetectionEnabled and state.randomizeAimPath then
+							if #state.bezierPoints == 0 then
+								state.bezierPoints = generateBezierPath(cam.CFrame.Position, predictedPosition)
+								state.currentPathProgress = 0
+							end
+							
+							state.currentPathProgress = state.currentPathProgress + 0.05
+							if state.currentPathProgress <= 1 then
+								local bezierTarget = state.bezierPoints[math.floor(state.currentPathProgress * #state.bezierPoints) + 1] or predictedPosition
+								targetCFrame = CFrame.new(cam.CFrame.Position, bezierTarget)
+								targetLook = targetCFrame.LookVector
+							else
+								state.bezierPoints = {}
+							end
+						end
+						
+						-- Apply drag effect (lower = more drag/slower aim)
+						local dragFactor = 1 - state.aimSubtleDrag
+						local interpolatedLook = currentLook:Lerp(targetLook, dragFactor * fadeMultiplier * (1 - state.aimSubtleStrength))
+						
+						-- Apply separate subtle smoothing
+						local smoothedLook = currentLook:Lerp(interpolatedLook, 1 - state.aimSubtleSmoothing)
+						
+						-- Add human-like variance with Perlin-like noise
+						if state.aimSubtleHumanization > 0 then
+							if state.antiDetectionEnabled then
+								local noiseX = pseudoRandom(tick() * 10, currentLook.X, noiseSeed)
+								local noiseY = pseudoRandom(tick() * 10, currentLook.Y, noiseSeed + 1)
+								local noiseZ = pseudoRandom(tick() * 10, currentLook.Z, noiseSeed + 2)
+								
+								local randomOffset = Vector3.new(
+									(noiseX - 0.5) * state.aimSubtleHumanization * 0.01,
+									(noiseY - 0.5) * state.aimSubtleHumanization * 0.01,
+									(noiseZ - 0.5) * state.aimSubtleHumanization * 0.01
+								)
+								smoothedLook = (smoothedLook + randomOffset).Unit
+							else
+								local randomOffset = Vector3.new(
+									math.random(-100, 100) / 1000 * state.aimSubtleHumanization,
+									math.random(-100, 100) / 1000 * state.aimSubtleHumanization,
+									math.random(-100, 100) / 1000 * state.aimSubtleHumanization
+								)
+								smoothedLook = (smoothedLook + randomOffset).Unit
+							end
+						end
+						
+						-- Add slight vertical bias
+						if state.aimSubtleVerticalBias > 0 then
+							local upVector = Vector3.new(0, state.aimSubtleVerticalBias * 0.1, 0)
+							smoothedLook = (smoothedLook + upVector).Unit
+						end
+						
+						-- Apply near-target lock strength
+						local screenPos = cam:WorldToViewportPoint(predictedPosition)
+						local cursorDist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mouse.X, mouse.Y)).Magnitude
+						if cursorDist < effectiveFOV * 0.3 then
+							local lockFactor = state.aimSubtleLockStrength * (1 - cursorDist / (effectiveFOV * 0.3))
+							smoothedLook = smoothedLook:Lerp(targetLook, lockFactor)
+						end
+						
+						-- Apply micro adjustments
+						if state.aimSubtleMicroAdjustments and cursorDist < 50 then
+							local microAdjust = CFrame.new(cam.CFrame.Position, predictedPosition).LookVector
+							smoothedLook = smoothedLook:Lerp(microAdjust, 0.1)
+						end
+						
+						-- Update camera
+						cam.CFrame = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + smoothedLook)
+						
+						-- Auto-shoot in subtle mode
 						if state.autoShootEnabled then
 							attemptAutoShoot()
 						end
 					else
-						-- Normal aim with configurable smoothness
+						-- Normal aim with bezier path randomization
+						if state.antiDetectionEnabled and state.randomizeAimPath then
+							if #state.bezierPoints == 0 then
+								state.bezierPoints = generateBezierPath(cam.CFrame.Position, predictedPosition)
+								state.currentPathProgress = 0
+							end
+							
+							state.currentPathProgress = state.currentPathProgress + 0.05
+							if state.currentPathProgress <= 1 then
+								local bezierTarget = state.bezierPoints[math.floor(state.currentPathProgress * #state.bezierPoints) + 1] or predictedPosition
+								targetCFrame = CFrame.new(cam.CFrame.Position, bezierTarget)
+							else
+								state.bezierPoints = {}
+							end
+						end
+						
 						cam.CFrame = cam.CFrame:Lerp(targetCFrame, 1 - state.aimSmoothness)
 						
 						-- Auto-shoot for normal aim if enabled
@@ -786,11 +1047,13 @@ local function updateAim()
 		else
 			state.currentTarget = nil
 			state.currentTargetPart = nil
+			state.bezierPoints = {}
 		end
 	else
 		if aimFOVCircle then aimFOVCircle.Visible = false end
 		state.currentTarget = nil
 		state.currentTargetPart = nil
+		state.bezierPoints = {}
 	end
 end
 
@@ -1067,12 +1330,40 @@ local function renderAim()
 	clearContent()
 	create("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame })
 	create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 16), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = contentFrame })
-	sectionHeader("aimbot", "Camera-based aimbot with subtle mode and auto-shoot support.", contentFrame)
+	sectionHeader("aimbot", "Camera-based aimbot with advanced subtle mode and anti-detection.", contentFrame)
 	
 	local aimToggle = settingsButton("AIMBOT: DISABLED", contentFrame)
 	aimToggle.Text = state.aimEnabled and "AIMBOT: ENABLED" or "AIMBOT: DISABLED"
 	aimToggle.BackgroundColor3 = state.aimEnabled and state.accent or theme.card2
 	aimToggle.TextColor3 = state.aimEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	
+	-- Anti-detection toggle
+	local antiDetectionRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
+	corner(antiDetectionRow, 14)
+	stroke(antiDetectionRow, theme.stroke, 0.55)
+	local antiDetectionButton = create("TextButton", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), BackgroundColor3 = state.antiDetectionEnabled and state.accent or theme.card2, AutoButtonColor = false, Text = "Anti-Detection: " .. (state.antiDetectionEnabled and "ON" or "OFF"), TextColor3 = state.antiDetectionEnabled and Color3.fromRGB(8, 8, 11) or theme.text, Font = Enum.Font.GothamSemibold, TextSize = 12, Parent = antiDetectionRow })
+	corner(antiDetectionButton, 10)
+	stroke(antiDetectionButton, theme.stroke, 0.6)
+	antiDetectionButton.MouseButton1Click:Connect(function()
+		state.antiDetectionEnabled = not state.antiDetectionEnabled
+		antiDetectionButton.Text = "Anti-Detection: " .. (state.antiDetectionEnabled and "ON" or "OFF")
+		antiDetectionButton.BackgroundColor3 = state.antiDetectionEnabled and state.accent or theme.card2
+		antiDetectionButton.TextColor3 = state.antiDetectionEnabled and Color3.fromRGB(8, 8, 11) or theme.text
+	end)
+	
+	-- Bezier path toggle
+	local bezierRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
+	corner(bezierRow, 14)
+	stroke(bezierRow, theme.stroke, 0.55)
+	local bezierButton = create("TextButton", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), BackgroundColor3 = state.randomizeAimPath and state.accent or theme.card2, AutoButtonColor = false, Text = "Bezier Paths: " .. (state.randomizeAimPath and "ON" or "OFF"), TextColor3 = state.randomizeAimPath and Color3.fromRGB(8, 8, 11) or theme.text, Font = Enum.Font.GothamSemibold, TextSize = 12, Parent = bezierRow })
+	corner(bezierButton, 10)
+	stroke(bezierButton, theme.stroke, 0.6)
+	bezierButton.MouseButton1Click:Connect(function()
+		state.randomizeAimPath = not state.randomizeAimPath
+		bezierButton.Text = "Bezier Paths: " .. (state.randomizeAimPath and "ON" or "OFF")
+		bezierButton.BackgroundColor3 = state.randomizeAimPath and state.accent or theme.card2
+		bezierButton.TextColor3 = state.randomizeAimPath and Color3.fromRGB(8, 8, 11) or theme.text
+	end)
 	
 	local requireKeyRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
 	corner(requireKeyRow, 14)
@@ -1103,14 +1394,9 @@ local function renderAim()
 		button.MouseButton1Click:Connect(function() state.aimPart = part; renderAim() end)
 	end
 	
-	local smoothnessInput = labeledInput("smoothing", "Smoothing (0.01-1.0)", contentFrame)
-	smoothnessInput.Text = tostring(state.aimSmoothness)
-	local aimFOVInput = labeledInput("aim fov", "FOV size (10-1000)", contentFrame)
-	aimFOVInput.Text = tostring(state.aimFOV)
-	local predictionInput = labeledInput("prediction", "Prediction (0-0.2)", contentFrame)
-	predictionInput.Text = tostring(state.aimPrediction)
+	-- Subtle aim section with enhanced controls
+	sectionHeader("subtle aim", "Ultra-stealthy aim with human-like movement. Adjust drag and behavior.", contentFrame)
 	
-	-- Subtle aim toggle
 	local subtleAimRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
 	corner(subtleAimRow, 14)
 	stroke(subtleAimRow, theme.stroke, 0.55)
@@ -1123,6 +1409,58 @@ local function renderAim()
 		subtleAimButton.BackgroundColor3 = state.aimSubtle and state.accent or theme.card2
 		subtleAimButton.TextColor3 = state.aimSubtle and Color3.fromRGB(8, 8, 11) or theme.text
 	end)
+
+	-- Subtle aim strength/drag
+	local subtleStrengthInput = labeledInput("aim strength", "Lock strength (0.5-0.99, higher = stronger)", contentFrame)
+	subtleStrengthInput.Text = tostring(state.aimSubtleStrength)
+	
+	local subtleDragInput = labeledInput("aim drag", "Movement drag (0.7-0.99, lower = more drag)", contentFrame)
+	subtleDragInput.Text = tostring(state.aimSubtleDrag)
+	
+	local subtleFOVInput = labeledInput("subtle FOV multiplier", "Bigger FOV for subtle (1.0-3.0)", contentFrame)
+	subtleFOVInput.Text = tostring(state.aimSubtleFOVMultiplier)
+	
+	local subtleSmoothingInput = labeledInput("subtle smoothing", "Separate smoothing (0.05-0.5)", contentFrame)
+	subtleSmoothingInput.Text = tostring(state.aimSubtleSmoothing)
+	
+	local subtlePredictionInput = labeledInput("subtle prediction", "Separate prediction (0-0.15)", contentFrame)
+	subtlePredictionInput.Text = tostring(state.aimSubtlePrediction)
+	
+	local subtleHumanizeInput = labeledInput("humanization", "Human-like variance (0-0.5)", contentFrame)
+	subtleHumanizeInput.Text = tostring(state.aimSubtleHumanization)
+	
+	local subtleVerticalInput = labeledInput("vertical bias", "Vertical aim preference (0-0.5)", contentFrame)
+	subtleVerticalInput.Text = tostring(state.aimSubtleVerticalBias)
+	
+	local subtleLockInput = labeledInput("lock strength", "Near-target lock (0.5-1.0)", contentFrame)
+	subtleLockInput.Text = tostring(state.aimSubtleLockStrength)
+	
+	local subtleFadeInput = labeledInput("fade distance", "Engage distance (10-200 studs)", contentFrame)
+	subtleFadeInput.Text = tostring(state.aimSubtleFadeDistance)
+	
+	-- Micro adjustments toggle
+	local microRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
+	corner(microRow, 14)
+	stroke(microRow, theme.stroke, 0.55)
+	local microButton = create("TextButton", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), BackgroundColor3 = state.aimSubtleMicroAdjustments and state.accent or theme.card2, AutoButtonColor = false, Text = "Micro Adjustments: " .. (state.aimSubtleMicroAdjustments and "ON" or "OFF"), TextColor3 = state.aimSubtleMicroAdjustments and Color3.fromRGB(8, 8, 11) or theme.text, Font = Enum.Font.GothamSemibold, TextSize = 12, Parent = microRow })
+	corner(microButton, 10)
+	stroke(microButton, theme.stroke, 0.6)
+	microButton.MouseButton1Click:Connect(function()
+		state.aimSubtleMicroAdjustments = not state.aimSubtleMicroAdjustments
+		microButton.Text = "Micro Adjustments: " .. (state.aimSubtleMicroAdjustments and "ON" or "OFF")
+		microButton.BackgroundColor3 = state.aimSubtleMicroAdjustments and state.accent or theme.card2
+		microButton.TextColor3 = state.aimSubtleMicroAdjustments and Color3.fromRGB(8, 8, 11) or theme.text
+	end)
+	
+	-- Normal aim settings
+	sectionHeader("normal aim", "Standard aimbot settings used when subtle mode is off.", contentFrame)
+	
+	local smoothnessInput = labeledInput("smoothing", "Smoothing (0.01-1.0)", contentFrame)
+	smoothnessInput.Text = tostring(state.aimSmoothness)
+	local aimFOVInput = labeledInput("aim fov", "FOV size (10-1000)", contentFrame)
+	aimFOVInput.Text = tostring(state.aimFOV)
+	local predictionInput = labeledInput("prediction", "Prediction (0-0.2)", contentFrame)
+	predictionInput.Text = tostring(state.aimPrediction)
 	
 	-- Auto shoot toggle and settings
 	local autoShootRow = create("Frame", { Size = UDim2.new(1, -14, 0, 48), BackgroundColor3 = theme.card, BorderSizePixel = 0, Parent = contentFrame })
@@ -1195,6 +1533,26 @@ local function renderAim()
 		local minHp = tonumber(minHealthInput.Text)
 		state.aimMinHealth = math.clamp(minHp or state.aimMinHealth, 0, 100)
 		
+		-- Subtle aim settings
+		local subtleStrength = tonumber(subtleStrengthInput.Text)
+		state.aimSubtleStrength = math.clamp(subtleStrength or state.aimSubtleStrength, 0.5, 0.99)
+		local subtleDrag = tonumber(subtleDragInput.Text)
+		state.aimSubtleDrag = math.clamp(subtleDrag or state.aimSubtleDrag, 0.7, 0.99)
+		local subtleFOVMult = tonumber(subtleFOVInput.Text)
+		state.aimSubtleFOVMultiplier = math.clamp(subtleFOVMult or state.aimSubtleFOVMultiplier, 1.0, 3.0)
+		local subtleSmoothing = tonumber(subtleSmoothingInput.Text)
+		state.aimSubtleSmoothing = math.clamp(subtleSmoothing or state.aimSubtleSmoothing, 0.05, 0.5)
+		local subtlePrediction = tonumber(subtlePredictionInput.Text)
+		state.aimSubtlePrediction = math.clamp(subtlePrediction or state.aimSubtlePrediction, 0, 0.15)
+		local subtleHumanize = tonumber(subtleHumanizeInput.Text)
+		state.aimSubtleHumanization = math.clamp(subtleHumanize or state.aimSubtleHumanization, 0, 0.5)
+		local subtleVertical = tonumber(subtleVerticalInput.Text)
+		state.aimSubtleVerticalBias = math.clamp(subtleVertical or state.aimSubtleVerticalBias, 0, 0.5)
+		local subtleLock = tonumber(subtleLockInput.Text)
+		state.aimSubtleLockStrength = math.clamp(subtleLock or state.aimSubtleLockStrength, 0.5, 1.0)
+		local subtleFade = tonumber(subtleFadeInput.Text)
+		state.aimSubtleFadeDistance = math.clamp(subtleFade or state.aimSubtleFadeDistance, 10, 200)
+		
 		-- Auto shoot settings
 		local shootDelay = tonumber(autoShootDelayInput.Text)
 		state.autoShootDelay = math.clamp(shootDelay or state.autoShootDelay, 0.05, 2.0)
@@ -1204,6 +1562,15 @@ local function renderAim()
 		aimFOVInput.Text = tostring(state.aimFOV)
 		predictionInput.Text = tostring(state.aimPrediction)
 		minHealthInput.Text = tostring(state.aimMinHealth)
+		subtleStrengthInput.Text = tostring(state.aimSubtleStrength)
+		subtleDragInput.Text = tostring(state.aimSubtleDrag)
+		subtleFOVInput.Text = tostring(state.aimSubtleFOVMultiplier)
+		subtleSmoothingInput.Text = tostring(state.aimSubtleSmoothing)
+		subtlePredictionInput.Text = tostring(state.aimSubtlePrediction)
+		subtleHumanizeInput.Text = tostring(state.aimSubtleHumanization)
+		subtleVerticalInput.Text = tostring(state.aimSubtleVerticalBias)
+		subtleLockInput.Text = tostring(state.aimSubtleLockStrength)
+		subtleFadeInput.Text = tostring(state.aimSubtleFadeDistance)
 		autoShootDelayInput.Text = tostring(state.autoShootDelay)
 	end)
 end
@@ -1367,8 +1734,7 @@ local function switchTab(tabName)
 	for name, button in pairs(sidebarButtons) do
 		local active = name == tabName
 		tween(button, 0.18, { BackgroundColor3 = active and state.accent or Color3.fromRGB(24, 24, 30), TextColor3 = active and Color3.fromRGB(8, 8, 11) or theme.text })
-	end
-	if tabName == "Settings" then renderSettings()
+	end	if tabName == "Settings" then renderSettings()
 	elseif tabName == "Movement" then renderMovement()
 	elseif tabName == "Visuals" then renderVisuals()
 	elseif tabName == "Aim" then renderAim()
@@ -1508,7 +1874,16 @@ local function buildApp()
 end
 
 local function buildGui()
-	screenGui = create("ScreenGui", { Name = "OnyxLocalInterface", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = playerGui })
+	-- Anti-detection: Use random GUI name
+	local guiName = "GUI_" .. HttpService:GenerateGUID(false):sub(1, 8)
+	screenGui = create("ScreenGui", { Name = guiName, ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = playerGui })
+	
+	-- Anti-detection: Hide from common GUI finders
+	pcall(function()
+		screenGui:SetAttribute("Protected", true)
+		screenGui:SetAttribute("System", true)
+	end)
+	
 	backdrop = create("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = theme.backdrop, BackgroundTransparency = 0.3, BorderSizePixel = 0, Parent = screenGui })
 	watermarkLabel = create("TextLabel", { AnchorPoint = Vector2.new(0, 0), Position = state.watermarkPosition, Size = UDim2.fromOffset(state.watermarkSize.X, state.watermarkSize.Y), BackgroundTransparency = 1, Text = state.watermarkText, TextColor3 = state.watermarkColor, TextXAlignment = Enum.TextXAlignment.Right, Font = state.watermarkFont, TextSize = 15, Active = true, Visible = false, Parent = screenGui })
 	watermarkResizeHandle = create("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 0, 1, 0), Size = UDim2.fromOffset(26, 26), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 1, BorderSizePixel = 0, Active = true, Visible = false, Parent = watermarkLabel })
@@ -1550,7 +1925,10 @@ local function buildGui()
 	updatePanelScale()
 end
 
-buildGui()
+-- Anti-detection: Delayed initialization
+task.delay(math.random(1, 3), function()
+	buildGui()
+end)
 
 if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updatePanelScale) end
 workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
@@ -1640,3 +2018,11 @@ screenGui.Destroying:Connect(function()
 	if espContainer then espContainer:Destroy() end
 	if aimFOVCircle then aimFOVCircle:Remove() end
 end)
+
+-- Anti-detection: Periodic cleanup
+coroutine.wrap(function()
+	while true do
+		task.wait(60 + math.random(0, 30))
+		collectgarbage("collect")
+	end
+end)()
